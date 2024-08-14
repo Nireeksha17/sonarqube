@@ -1,0 +1,70 @@
+name: CI Pipeline with SonarQube and Manual Approval
+ 
+on:
+  workflow_call:
+ 
+jobs:
+  sonarqube_scan:
+    name: SonarQube Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: display message
+        run: |
+          echo 'Hello from Sonar job !!!'
+          
+      - name: sonar task
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          
+      - name: SonarQube Quality Gate check
+        id: sonarqube-quality-gate-check
+        uses: sonarsource/sonarqube-quality-gate-action@master
+         # Force to fail step after specific time.
+        timeout-minutes: 5
+        env:
+         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+         SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # Show the output from the Quality Gate.
+      # The possible outputs of the `quality-gate-status` variable are `PASSED`, `WARN` or `FAILED`.
+      - name: "SonarQube Quality Gate Status value"
+        id: set_status
+        run: echo "The Quality Gate status is ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }}"
+        status = ${{ steps.sonarqube-quality-gate-check.outputs.quality-gate-status }}
+
+
+     
+
+  manual_approval:
+    name: Manual Approval
+    needs: sonarqube_scan
+    runs-on: ubuntu-latest
+    if: ${{ needs.set_status.outputs.status }} == 'FAILED' || ${{ needs.set_status.outputs.status}} == 'WARN'
+    steps: 
+      - name: Generate token
+        id: generate_token
+        uses: tibdex/github-app-token@v1
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+      - name : "Quality Gate failed, please approve / reject the pipeline"
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ steps.generate_token.outputs.token }}
+          approvers: nandu.priya@gmail.com
+          minimum-approvals: 1
+ 
+      - name: Proceed with Build
+        if: needs.set_status.outputs.status == 'PASSED'
+        run: echo "Quality Gate passed, proceeding with the build..."
+      
+      # - name: Continue Build
+      #   if: needs.manual_approval.outputs.status == 'approved'
+      #   run: echo "Approval received, continuing the build..."
+      
+    
